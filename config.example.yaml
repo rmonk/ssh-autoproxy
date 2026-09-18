@@ -1,0 +1,69 @@
+# Copy to ~/.config/ssh-autoproxy/config.yaml (or $XDG_CONFIG_HOME/ssh-autoproxy/config.yaml)
+# and adjust to your own networks/jump hosts.
+#
+# Each entry under `routes:` is an independently managed jump host: its
+# own destinations (host_patterns/host_subnets), its own "direct network"
+# profiles, and (optionally) its own SOCKS5 listener. Add as many as you
+# need — e.g. one for a home LAN behind a Tailscale bastion, another for
+# a work network behind a different bastion.
+
+# socks_proxy is optional per route, with three ways to write it:
+#   omitted entirely       -> SOCKS5 disabled; only SSH ProxyJump/check-ssh
+#                              is managed for this route.
+#   { active: true }       -> SOCKS5 enabled on 127.0.0.1, with the daemon
+#                              picking a free random high port at startup
+#                              (see `ssh-autoproxy status` for the port).
+#   { bind: ..., port: ... } -> SOCKS5 enabled on exactly the bind/port given.
+
+routes:
+  - name: home-lan
+    jump_host: gateway.example-tailnet.ts.net
+    host_patterns:
+      - "*.lan"
+    # host_subnets: []   # optional CIDRs, PAC-only (isInNet)
+    direct_profiles:
+      - name: home-wifi
+        ssid: HomeWiFi
+        gateway: 10.20.0.1
+        subnet: 10.20.0.0/21
+    socks_proxy:
+      bind: 127.0.0.1
+      port: 1080
+    # keep_tunnel_when_direct: false
+
+  - name: work
+    jump_host: bastion.work.example.com
+    host_patterns:
+      - "*.corp"
+    direct_profiles:
+      - name: office-wifi
+        ssid: CorpWifi
+    socks_proxy:
+      active: true   # SOCKS5 enabled, port picked at random — see `status`
+
+# Settings below are shared across all routes.
+
+ssh:
+  control_path: "~/.ssh/control/%r@%h:%p"
+  control_persist: 10m
+  connect_timeout: 5s
+  server_alive_interval: 15s
+  server_alive_count_max: 3
+
+pac:
+  enabled: true
+  bind: 127.0.0.1
+  port: 8850
+  path: /proxy.pac
+
+daemon:
+  poll_interval: 30s
+
+backoff:
+  base: 2s
+  max: 2m
+  jitter: equal
+
+notify:
+  enabled: true
+  cooldown: 20m

@@ -1,0 +1,14 @@
+# Built binary
+/ssh-autoproxy
+
+# Go build/test artifacts
+*.test
+*.out
+/dist/
+
+# Local config (never commit real routes/jump hosts)
+config.yaml
+
+# Editor/OS cruft
+.DS_Store
+*.swp
