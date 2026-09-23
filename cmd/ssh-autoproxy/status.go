@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"ssh-autoproxy/internal/netstate"
+	"ssh-autoproxy/internal/state"
 )
 
 type routeStatus struct {
@@ -18,6 +19,7 @@ type routeStatus struct {
 	JumpHost       string `json:"jump_host"`
 	MatchedProfile string `json:"matched_profile"`
 	ProxyNeeded    bool   `json:"proxy_needed"`
+	SocksAddr      string `json:"socks_addr,omitempty"`
 	TunnelUp       bool   `json:"tunnel_up"`
 }
 
@@ -36,12 +38,25 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 
+			// The daemon records the SOCKS addresses it actually bound;
+			// this process's own config load may have picked different
+			// random ports. A missing/unreadable state file just falls
+			// back to the config's addresses.
+			var recorded map[string]string
+			if st, err := state.Load(""); err == nil {
+				recorded = st.SocksAddrs
+			}
+
 			routes := make([]routeStatus, 0, len(cfg.Routes))
 			for _, r := range cfg.Routes {
 				profile, proxyNeeded := netstate.Evaluate(r.DirectProfiles, ns)
 				tunnelUp := false
+				addr := ""
 				if r.SocksProxy != nil {
-					addr := net.JoinHostPort(r.SocksProxy.Bind, strconv.Itoa(r.SocksProxy.Port))
+					addr = recorded[r.Name]
+					if addr == "" {
+						addr = net.JoinHostPort(r.SocksProxy.Bind, strconv.Itoa(r.SocksProxy.Port))
+					}
 					if conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
 						tunnelUp = true
 						_ = conn.Close()
@@ -52,6 +67,7 @@ func newStatusCmd() *cobra.Command {
 					JumpHost:       r.JumpHost,
 					MatchedProfile: profile,
 					ProxyNeeded:    proxyNeeded,
+					SocksAddr:      addr,
 					TunnelUp:       tunnelUp,
 				})
 			}
@@ -97,7 +113,11 @@ func newStatusCmd() *cobra.Command {
 					fmt.Fprintln(out, "  Matched profile:  none (away)")
 				}
 				fmt.Fprintf(out, "  Proxy needed:     %v\n", rs.ProxyNeeded)
-				fmt.Fprintf(out, "  SOCKS tunnel up:  %v\n", rs.TunnelUp)
+				if rs.SocksAddr != "" {
+					fmt.Fprintf(out, "  SOCKS tunnel up:  %v (%s)\n", rs.TunnelUp, rs.SocksAddr)
+				} else {
+					fmt.Fprintf(out, "  SOCKS tunnel up:  %v\n", rs.TunnelUp)
+				}
 			}
 
 			if cfg.PAC.Enabled {

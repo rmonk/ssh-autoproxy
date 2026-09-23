@@ -1,5 +1,6 @@
-// Package state persists small daemon state (currently: notification
-// dedup timestamps) across restarts.
+// Package state persists small daemon state (notification dedup
+// timestamps, and the SOCKS addresses the running daemon's tunnels are
+// bound to) across restarts and to other ssh-autoproxy invocations.
 package state
 
 import (
@@ -15,6 +16,13 @@ type NotificationEntry struct {
 
 type State struct {
 	Notifications map[string]NotificationEntry `json:"notifications"`
+
+	// SocksAddrs maps route name to the bind:port the daemon's ssh -D
+	// forward for that route is using. Needed because a socks_proxy with
+	// no explicit port gets a random one picked afresh by every process
+	// that loads the config, so other invocations (e.g. `status`) can't
+	// recompute it themselves.
+	SocksAddrs map[string]string `json:"socks_addrs,omitempty"`
 }
 
 // FilePath returns the default state file location, honoring

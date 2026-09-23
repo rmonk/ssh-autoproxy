@@ -40,3 +40,21 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Errorf("LastNotified = %v, want %v", got, now)
 	}
 }
+
+func TestSaveLoadSocksAddrs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	st := &State{
+		Notifications: map[string]NotificationEntry{},
+		SocksAddrs:    map[string]string{"home-lan": "127.0.0.1:33333"},
+	}
+	if err := Save(path, st); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := loaded.SocksAddrs["home-lan"]; got != "127.0.0.1:33333" {
+		t.Errorf("SocksAddrs[home-lan] = %q, want 127.0.0.1:33333", got)
+	}
+}
