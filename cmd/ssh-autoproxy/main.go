@@ -37,6 +37,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCheckSSHCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newInstallCmd())
+	root.AddCommand(newUpdateCmd())
 
 	return root
 }

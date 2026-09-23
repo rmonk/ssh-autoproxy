@@ -31,6 +31,8 @@ ssh-autoproxy status           # current network match, per-route tunnel/PAC hea
 ssh-autoproxy check-ssh <route> # exit 0 = proxy needed, non-zero = direct, for that route
 ssh-autoproxy daemon           # run the background loop in the foreground
 ssh-autoproxy daemon -v        # ...and also log each SOCKS5 request being proxied
+ssh-autoproxy update           # update to the latest release (checksum-verified)
+ssh-autoproxy update --check   # only report whether a newer release exists
 ```
 
 `check-ssh <route>` is meant to be called from an OpenSSH `Match exec`
