@@ -154,6 +154,10 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 	if err != nil {
 		return fmt.Errorf("loading state: %w", err)
 	}
+	st.SocksAddrs = socksAddrs(cfg.Routes)
+	if err := state.Save("", st); err != nil {
+		slog.Warn("saving state failed", "error", err)
+	}
 
 	if cfg.PAC.Enabled {
 		addr := net.JoinHostPort(cfg.PAC.Bind, strconv.Itoa(cfg.PAC.Port))
@@ -286,6 +290,18 @@ func handleErrorCategory(cfg *config.Config, st *state.State, routeName string, 
 		slog.Warn("saving notification state failed", "error", err)
 	}
 	notify.Send(fmt.Sprintf("ssh-autoproxy: %s", routeName), describeCategory(cat))
+}
+
+// socksAddrs returns each SOCKS-enabled route's bind:port as resolved in
+// this process's config (including any randomly picked ports).
+func socksAddrs(routes []config.Route) map[string]string {
+	addrs := map[string]string{}
+	for _, r := range routes {
+		if r.SocksProxy != nil {
+			addrs[r.Name] = net.JoinHostPort(r.SocksProxy.Bind, strconv.Itoa(r.SocksProxy.Port))
+		}
+	}
+	return addrs
 }
 
 func describeCategory(cat tunnel.ErrorCategory) string {
