@@ -52,6 +52,14 @@ func Run(ctx context.Context, configPath string, verbose bool) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+	if os.Getenv("SSH_AUTH_SOCK") == "" {
+		// The ssh subprocesses inherit this process's environment, fixed
+		// at startup — a systemd user service started before the session
+		// exported SSH_AUTH_SOCK will never see the agent, however many
+		// keys get ssh-add'ed later.
+		slog.Warn("SSH_AUTH_SOCK is not set; ssh tunnels cannot use your SSH agent. " +
+			"Re-run `ssh-autoproxy install` or `systemctl --user restart ssh-autoproxy`.")
+	}
 
 	reload := make(chan struct{}, 1)
 	go watchConfigFile(ctx, resolvedPath, reload)
@@ -283,7 +291,11 @@ func handleErrorCategory(cfg *config.Config, st *state.State, routeName string, 
 func describeCategory(cat tunnel.ErrorCategory) string {
 	switch cat {
 	case tunnel.CategoryAuthPublicKey:
-		return "Permission denied (publickey) connecting to the jump host. Check ssh-add / your key."
+		msg := "Permission denied (publickey) connecting to the jump host. Check ssh-add / your key."
+		if os.Getenv("SSH_AUTH_SOCK") == "" {
+			msg += " (daemon has no SSH_AUTH_SOCK — try `systemctl --user restart ssh-autoproxy`)"
+		}
+		return msg
 	case tunnel.CategoryAuthAgent:
 		return "Could not reach your SSH agent. Is it running?"
 	case tunnel.CategoryHostKeyVerification:

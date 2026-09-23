@@ -15,12 +15,12 @@ import (
 
 const unitTemplate = `[Unit]
 Description=ssh-autoproxy background tunnel/proxy daemon
-After=network-online.target
+After=network-online.target ssh-agent.socket
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%s daemon
+%sExecStart=%s daemon
 Restart=on-failure
 RestartSec=5
 
@@ -76,7 +76,8 @@ func installUnit(out io.Writer, cfg *config.Config) error {
 		return err
 	}
 	unitPath := filepath.Join(unitDir, "ssh-autoproxy.service")
-	content := fmt.Sprintf(unitTemplate, exePath)
+	authSock := os.Getenv("SSH_AUTH_SOCK")
+	content := renderUnit(exePath, authSock, os.Getenv("XDG_RUNTIME_DIR"))
 	if err := os.WriteFile(unitPath, []byte(content), 0o644); err != nil {
 		return err
 	}
@@ -87,8 +88,33 @@ func installUnit(out io.Writer, cfg *config.Config) error {
 	if err := runSystemctl(out, "enable", "--now", "ssh-autoproxy.service"); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Installed and started %s\n\n", unitPath)
+	fmt.Fprintf(out, "Installed and started %s\n", unitPath)
+	if authSock == "" {
+		fmt.Fprintln(out, "WARNING: SSH_AUTH_SOCK is not set in this shell, so the service has no")
+		fmt.Fprintln(out, "SSH agent configured. Start your agent and re-run `ssh-autoproxy install`.")
+	}
+	fmt.Fprintln(out)
 	return nil
+}
+
+// renderUnit builds the systemd unit file. The installer's SSH_AUTH_SOCK is
+// baked in as an explicit Environment= line: the service otherwise inherits
+// the user manager's environment as of when it starts, which at boot is
+// usually before the desktop session has exported SSH_AUTH_SOCK — leaving
+// every ssh subprocess without an agent for the daemon's whole lifetime.
+// A socket under runtimeDir is written relative to %t so the unit isn't
+// tied to a specific UID's /run/user path.
+func renderUnit(exePath, authSock, runtimeDir string) string {
+	env := ""
+	if authSock != "" {
+		if runtimeDir != "" {
+			if rel, ok := strings.CutPrefix(authSock, strings.TrimSuffix(runtimeDir, "/")+"/"); ok {
+				authSock = "%t/" + rel
+			}
+		}
+		env = "Environment=SSH_AUTH_SOCK=" + authSock + "\n"
+	}
+	return fmt.Sprintf(unitTemplate, env, exePath)
 }
 
 func runSystemctl(out io.Writer, args ...string) error {
