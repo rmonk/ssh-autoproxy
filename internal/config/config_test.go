@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -314,5 +315,45 @@ func TestValidateAllowsRouteWithNoSocksProxy(t *testing.T) {
 	cfg.Routes = []Route{{Name: "a", JumpHost: "a.example.com"}}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() = %v, want nil", err)
+	}
+}
+
+func TestProxyDefaults(t *testing.T) {
+	cfg := Default()
+	if !cfg.Proxy.Enabled || cfg.Proxy.Bind != "127.0.0.1" || cfg.Proxy.Port != 8851 {
+		t.Errorf("Proxy defaults = %+v, want enabled on 127.0.0.1:8851", cfg.Proxy)
+	}
+}
+
+func TestValidateProxy(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{"defaults ok", func(*Config) {}, ""},
+		{"non-loopback bind", func(c *Config) { c.Proxy.Bind = "0.0.0.0" }, "proxy.bind must be a loopback"},
+		{"bad port", func(c *Config) { c.Proxy.Port = 0 }, "proxy.port must be"},
+		{"collides with pac", func(c *Config) { c.Proxy.Port = c.PAC.Port }, "pac and proxy both use"},
+		{"collides with route socks", func(c *Config) {
+			c.Routes = []Route{{Name: "a", JumpHost: "a.example.com", SocksProxy: &SocksProxyConfig{Bind: "127.0.0.1", Port: 8851}}}
+		}, `route "a" socks_proxy and proxy both use`},
+		{"disabled skips checks", func(c *Config) { c.Proxy = ProxyConfig{Enabled: false, Bind: "0.0.0.0"} }, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			tt.mutate(cfg)
+			err := cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }

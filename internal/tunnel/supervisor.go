@@ -15,12 +15,16 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"ssh-autoproxy/internal/config"
 )
 
-const stabilityThreshold = 60 * time.Second
+const (
+	stabilityThreshold = 60 * time.Second
+	stopGracePeriod    = 5 * time.Second
+)
 
 // Supervisor owns a single persistent ssh subprocess to one route's jump
 // host, starting/stopping it to match Ensure's desired state and
@@ -144,7 +148,16 @@ func (s *Supervisor) run(ctx context.Context, done chan struct{}) {
 }
 
 func (s *Supervisor) runOnce(ctx context.Context) error {
+	s.removeStaleControlSocket(ctx)
+
 	cmd := exec.CommandContext(ctx, "ssh", s.sshArgs()...)
+	// Stop ssh with SIGTERM, not exec's default SIGKILL: a terminated
+	// master removes its own control socket on the way out, whereas a
+	// killed one leaves it behind for the next master to trip over (see
+	// removeStaleControlSocket). If it hasn't exited after
+	// stopGracePeriod, WaitDelay falls back to SIGKILL.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = stopGracePeriod
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return err

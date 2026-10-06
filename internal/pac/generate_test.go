@@ -33,7 +33,7 @@ func testRoutes() []config.Route {
 
 func TestGenerateProxyNeeded(t *testing.T) {
 	routes := testRoutes()
-	out := Generate(routes, map[string]bool{"home-lan": true, "work": false, "no-socks": true})
+	out := Generate(routes, map[string]bool{"home-lan": true, "work": false, "no-socks": true}, "")
 
 	if !strings.Contains(out, `shExpMatch(host, "*.lan")`) {
 		t.Errorf("missing shExpMatch branch for home-lan:\n%s", out)
@@ -59,7 +59,7 @@ func TestGenerateProxyNeeded(t *testing.T) {
 
 func TestGenerateAllDirect(t *testing.T) {
 	routes := testRoutes()
-	out := Generate(routes, map[string]bool{"home-lan": false, "work": false})
+	out := Generate(routes, map[string]bool{"home-lan": false, "work": false}, "")
 	if strings.Contains(out, "SOCKS5") {
 		t.Errorf("no route should mention SOCKS5 when every route is direct:\n%s", out)
 	}
@@ -67,7 +67,7 @@ func TestGenerateAllDirect(t *testing.T) {
 
 func TestGenerateCatchAllIsDirect(t *testing.T) {
 	routes := testRoutes()
-	out := Generate(routes, map[string]bool{"home-lan": true, "work": true})
+	out := Generate(routes, map[string]bool{"home-lan": true, "work": true}, "")
 	lastReturn := out[strings.LastIndex(out, "return"):]
 	if !strings.Contains(lastReturn, `"DIRECT"`) {
 		t.Errorf("catch-all branch must be DIRECT, got: %s", lastReturn)
@@ -103,8 +103,22 @@ func TestGenerateInvalidSubnetSkipped(t *testing.T) {
 		HostSubnets: []string{"not-a-cidr"},
 		SocksProxy:  &config.SocksProxyConfig{Bind: "127.0.0.1", Port: 1080},
 	}}
-	out := Generate(routes, map[string]bool{"a": true})
+	out := Generate(routes, map[string]bool{"a": true}, "")
 	if strings.Contains(out, "isInNet") {
 		t.Errorf("invalid CIDR should be skipped, got:\n%s", out)
+	}
+}
+
+func TestGenerateFrontProxy(t *testing.T) {
+	routes := testRoutes()
+	out := Generate(routes, map[string]bool{"home-lan": true, "work": false}, "127.0.0.1:8851")
+	if !strings.Contains(out, `return "SOCKS5 127.0.0.1:8851; DIRECT"; // route: home-lan`) {
+		t.Errorf("home-lan (away) should point at the front-door proxy:\n%s", out)
+	}
+	if strings.Contains(out, "127.0.0.1:1080") {
+		t.Errorf("per-route socks address must not appear when a front proxy is set:\n%s", out)
+	}
+	if strings.Contains(out, `"SOCKS5 127.0.0.1:8851; DIRECT"; // route: work`) {
+		t.Errorf("work (direct) must stay DIRECT:\n%s", out)
 	}
 }

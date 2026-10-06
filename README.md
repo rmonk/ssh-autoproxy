@@ -49,7 +49,18 @@ and works even if the daemon isn't running.
   to enable SOCKS5 on a random free port on `127.0.0.1` (see
   `ssh-autoproxy status` for the port picked); or give an explicit
   `bind`/`port` to use exactly those.
-- The SOCKS5 proxy and PAC server always bind to loopback only
+- The daemon also runs its own proxy listener (default `127.0.0.1:8851`,
+  see `proxy:` in the config) that speaks both SOCKS5 and HTTP CONNECT.
+  When it's enabled, the PAC file sends route hosts there, and the listener
+  decides per connection: hosts matching a route that currently needs its
+  jump host go through that route's tunnel; everything else (including
+  hosts matching no route) is connected directly. So it's also safe to
+  point other tools at it, e.g. `https_proxy=http://127.0.0.1:8851` or
+  `curl --socks5-hostname 127.0.0.1:8851`. Matching uses the hostname the
+  client sends (`host_patterns`) or, for a literal IP, `host_subnets`;
+  hostnames are never resolved locally. Plain `http://` requests sent as
+  HTTP-proxy requests (not CONNECT) are rejected with 405.
+- The SOCKS5 proxy, PAC server, and proxy listener always bind to loopback only
   (`127.0.0.1`) — this is a personal, single-machine proxy, not an open
   relay.
 - Notifications for SSH key/auth failures are deduplicated per failure

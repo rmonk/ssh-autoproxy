@@ -172,7 +172,7 @@ func printManualSteps(out io.Writer, cfg *config.Config, dryRun bool) {
 			break
 		}
 	}
-	if !anySocks && !cfg.PAC.Enabled {
+	if !anySocks && !cfg.PAC.Enabled && !cfg.Proxy.Enabled {
 		return
 	}
 
@@ -183,6 +183,14 @@ func printManualSteps(out io.Writer, cfg *config.Config, dryRun bool) {
 			continue
 		}
 		fmt.Fprintf(out, "SOCKS5 (%s):  %s:%d\n", r.Name, r.SocksProxy.Bind, r.SocksProxy.Port)
+	}
+	if cfg.Proxy.Enabled {
+		proxyAddr := fmt.Sprintf("%s:%d", cfg.Proxy.Bind, cfg.Proxy.Port)
+		fmt.Fprintf(out, "\nProxy (SOCKS5 + HTTP CONNECT): %s\n", proxyAddr)
+		fmt.Fprintln(out, "         The PAC file points route hosts here. Other tools can use it too,")
+		fmt.Fprintln(out, "         e.g. https_proxy=http://"+proxyAddr+" or curl --socks5-hostname "+proxyAddr+";")
+		fmt.Fprintln(out, "         hosts matching no route (or a route that's currently direct)")
+		fmt.Fprintln(out, "         are connected directly.")
 	}
 	if cfg.PAC.Enabled {
 		pacURL := fmt.Sprintf("http://%s:%d%s", cfg.PAC.Bind, cfg.PAC.Port, cfg.PAC.Path)
