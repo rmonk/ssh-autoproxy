@@ -83,6 +83,16 @@ func newStatusCmd() *cobra.Command {
 				}
 			}
 
+			proxyAddr := ""
+			proxyUp := false
+			if cfg.Proxy.Enabled {
+				proxyAddr = net.JoinHostPort(cfg.Proxy.Bind, strconv.Itoa(cfg.Proxy.Port))
+				if conn, err := net.DialTimeout("tcp", proxyAddr, 500*time.Millisecond); err == nil {
+					proxyUp = true
+					_ = conn.Close()
+				}
+			}
+
 			if asJSON {
 				result := struct {
 					SSID    string        `json:"ssid"`
@@ -91,7 +101,9 @@ func newStatusCmd() *cobra.Command {
 					Routes  []routeStatus `json:"routes"`
 					PACURL  string        `json:"pac_url,omitempty"`
 					PACUp   bool          `json:"pac_up"`
-				}{ns.SSID, ns.Gateway, ns.Address, routes, pacURL, pacUp}
+					Proxy   string        `json:"proxy_addr,omitempty"`
+					ProxyUp bool          `json:"proxy_up"`
+				}{ns.SSID, ns.Gateway, ns.Address, routes, pacURL, pacUp, proxyAddr, proxyUp}
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
 				return enc.Encode(result)
@@ -120,8 +132,14 @@ func newStatusCmd() *cobra.Command {
 				}
 			}
 
+			if cfg.PAC.Enabled || cfg.Proxy.Enabled {
+				fmt.Fprintln(out)
+			}
 			if cfg.PAC.Enabled {
-				fmt.Fprintf(out, "\nPAC server up:    %v (%s)\n", pacUp, pacURL)
+				fmt.Fprintf(out, "PAC server up:    %v (%s)\n", pacUp, pacURL)
+			}
+			if cfg.Proxy.Enabled {
+				fmt.Fprintf(out, "Proxy up:         %v (%s, SOCKS5 + HTTP CONNECT)\n", proxyUp, proxyAddr)
 			}
 			return nil
 		},

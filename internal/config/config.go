@@ -84,6 +84,16 @@ type PACConfig struct {
 	Path    string `yaml:"path"`
 }
 
+// ProxyConfig configures the daemon's own front-door proxy listener
+// (SOCKS5 and HTTP CONNECT on one port). When enabled, the PAC file
+// points matched hosts at this listener instead of at each route's own
+// socks_proxy, and the listener picks direct vs. tunnel per connection.
+type ProxyConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Bind    string `yaml:"bind"`
+	Port    int    `yaml:"port"`
+}
+
 type DaemonConfig struct {
 	PollInterval Duration `yaml:"poll_interval"`
 }
@@ -103,6 +113,7 @@ type Config struct {
 	Routes  []Route       `yaml:"routes"`
 	SSH     SSHConfig     `yaml:"ssh"`
 	PAC     PACConfig     `yaml:"pac"`
+	Proxy   ProxyConfig   `yaml:"proxy"`
 	Daemon  DaemonConfig  `yaml:"daemon"`
 	Backoff BackoffConfig `yaml:"backoff"`
 	Notify  NotifyConfig  `yaml:"notify"`
@@ -124,6 +135,7 @@ func Default() *Config {
 			ServerAliveCountMax: 3,
 		},
 		PAC:     PACConfig{Enabled: true, Bind: "127.0.0.1", Port: 8850, Path: "/proxy.pac"},
+		Proxy:   ProxyConfig{Enabled: true, Bind: "127.0.0.1", Port: 8851},
 		Daemon:  DaemonConfig{PollInterval: Duration{30 * time.Second}},
 		Backoff: BackoffConfig{Base: Duration{2 * time.Second}, Max: Duration{2 * time.Minute}, Jitter: "equal"},
 		Notify:  NotifyConfig{Enabled: true, Cooldown: Duration{20 * time.Minute}},
@@ -229,9 +241,9 @@ func pickFreePort(bind string) (int, error) {
 }
 
 // Validate checks constraints not covered by zero-value defaults: loopback-
-// only binds for every SOCKS5/PAC listener (this tool is a personal,
+// only binds for every SOCKS5/PAC/proxy listener (this tool is a personal,
 // single-machine proxy, never an open relay), required/unique route
-// fields, and that enabled routes don't collide on the same bind:port.
+// fields, and that no two enabled listeners share a bind:port.
 func (c *Config) Validate() error {
 	seenNames := map[string]bool{}
 	seenAddrs := map[string]string{}
@@ -254,9 +266,9 @@ func (c *Config) Validate() error {
 			}
 			addr := fmt.Sprintf("%s:%d", r.SocksProxy.Bind, r.SocksProxy.Port)
 			if owner, ok := seenAddrs[addr]; ok {
-				return fmt.Errorf("routes %q and %q both use socks_proxy %s — give each route a distinct port", owner, r.Name, addr)
+				return fmt.Errorf("%s and route %q both use socks_proxy %s — give each a distinct port", owner, r.Name, addr)
 			}
-			seenAddrs[addr] = r.Name
+			seenAddrs[addr] = fmt.Sprintf("route %q socks_proxy", r.Name)
 		}
 	}
 
@@ -264,7 +276,32 @@ func (c *Config) Validate() error {
 		if err := requireLoopback("pac.bind", c.PAC.Bind); err != nil {
 			return err
 		}
+		if err := claimAddr(seenAddrs, "pac", c.PAC.Bind, c.PAC.Port); err != nil {
+			return err
+		}
 	}
+	if c.Proxy.Enabled {
+		if err := requireLoopback("proxy.bind", c.Proxy.Bind); err != nil {
+			return err
+		}
+		if c.Proxy.Port <= 0 || c.Proxy.Port > 65535 {
+			return fmt.Errorf("proxy.port must be 1-65535, got %d", c.Proxy.Port)
+		}
+		if err := claimAddr(seenAddrs, "proxy", c.Proxy.Bind, c.Proxy.Port); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// claimAddr records that owner listens on bind:port, failing if another
+// listener already does.
+func claimAddr(seen map[string]string, owner, bind string, port int) error {
+	addr := fmt.Sprintf("%s:%d", bind, port)
+	if other, ok := seen[addr]; ok {
+		return fmt.Errorf("%s and %s both use %s — give each a distinct port", other, owner, addr)
+	}
+	seen[addr] = owner
 	return nil
 }
 

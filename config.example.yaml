@@ -56,6 +56,18 @@ pac:
   port: 8850
   path: /proxy.pac
 
+# The daemon's own proxy listener: SOCKS5 and HTTP CONNECT on one fixed
+# port. When enabled, the PAC file sends route hosts here (instead of to
+# each route's socks_proxy), and each connection is routed by destination:
+# through the matching route's tunnel if that route currently needs its
+# jump host, otherwise directly — including hosts that match no route, so
+# it's safe to point tools at it globally (e.g. https_proxy). Routes take
+# part only if they have a socks_proxy, which the listener tunnels through.
+proxy:
+  enabled: true
+  bind: 127.0.0.1
+  port: 8851
+
 daemon:
   poll_interval: 30s
 

@@ -21,6 +21,7 @@ import (
 	"ssh-autoproxy/internal/netstate"
 	"ssh-autoproxy/internal/notify"
 	"ssh-autoproxy/internal/pac"
+	"ssh-autoproxy/internal/proxy"
 	"ssh-autoproxy/internal/state"
 	"ssh-autoproxy/internal/tunnel"
 )
@@ -28,7 +29,7 @@ import (
 const (
 	debounceInterval   = 500 * time.Millisecond
 	configPollInterval = 2 * time.Second
-	pacShutdownTimeout = 3 * time.Second
+	pacShutdownTimeout = 3 * time.Second // also used for the proxy listener
 )
 
 type routeError struct {
@@ -167,6 +168,27 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 		slog.Info("PAC server listening", "addr", addr, "path", cfg.PAC.Path)
 	}
 
+	// The front-door proxy listener, when enabled, is what the PAC file
+	// advertises; it routes each connection by destination host using
+	// proxyTable, which applyState keeps current.
+	var proxyTable *proxy.Table
+	var proxyServer *proxy.Server
+	frontAddr := ""
+	if cfg.Proxy.Enabled {
+		frontAddr = net.JoinHostPort(cfg.Proxy.Bind, strconv.Itoa(cfg.Proxy.Port))
+		proxyTable = proxy.NewTable(cfg.Routes)
+		proxyServer = proxy.NewServer(proxyTable, verbose)
+		if err := proxyServer.Start(frontAddr); err != nil {
+			if cfg.PAC.Enabled {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), pacShutdownTimeout)
+				_ = pacServer.Shutdown(shutdownCtx)
+				cancel()
+			}
+			return fmt.Errorf("starting proxy listener: %w", err)
+		}
+		slog.Info("proxy listening", "addr", frontAddr, "protocols", "socks5,http-connect")
+	}
+
 	recheck := make(chan struct{}, 1)
 	triggerRecheck := func() {
 		select {
@@ -199,8 +221,11 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 			sup.Ensure(proxyNeeded || route.KeepTunnelWhenDirect)
 		}
 
+		if proxyTable != nil {
+			proxyTable.Update(decisions)
+		}
 		if changed && cfg.PAC.Enabled {
-			pacServer.Update(pac.Generate(cfg.Routes, decisions))
+			pacServer.Update(pac.Generate(cfg.Routes, decisions, frontAddr))
 		}
 	}
 	applyState()
@@ -214,6 +239,13 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 	for {
 		select {
 		case <-ctx.Done():
+			if proxyServer != nil {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), pacShutdownTimeout)
+				if err := proxyServer.Shutdown(shutdownCtx); err != nil {
+					slog.Warn("proxy listener shutdown failed", "error", err)
+				}
+				cancel()
+			}
 			for _, sup := range supervisors {
 				sup.Stop()
 			}
